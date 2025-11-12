@@ -22,7 +22,8 @@ const editorOptions: EditorProps["options"] = {
 };
 
 type Props = {
-  monacoRef?: React.RefObject<any>;
+  // parent should pass a ref created with React.useRef(null)
+  monacoRef?: React.MutableRefObject<any | null>;
 };
 
 const TextEditor = ({ monacoRef }: Props) => {
@@ -39,7 +40,7 @@ const TextEditor = ({ monacoRef }: Props) => {
   const internalEditorRef = React.useRef<any>(null);
 
   React.useEffect(() => {
-    monaco?.languages.json.jsonDefaults.setDiagnosticsOptions({
+    monaco?.languages?.json?.jsonDefaults.setDiagnosticsOptions({
       validate: true,
       allowComments: true,
       enableSchemaRequest: true,
@@ -53,7 +54,7 @@ const TextEditor = ({ monacoRef }: Props) => {
         ],
       }),
     });
-  }, [jsonSchema, monaco?.languages.json.jsonDefaults]);
+  }, [jsonSchema, monaco]);
 
   React.useEffect(() => {
     const beforeunload = (e: BeforeUnloadEvent) => {
@@ -76,12 +77,8 @@ const TextEditor = ({ monacoRef }: Props) => {
   const handleMount: OnMount = useCallback(
     (editor, monacoInstance) => {
       // expose the editor instance to parent via ref so other components can call setValue/getValue
-      if (monacoRef && typeof monacoRef === "object") {
-        try {
-          monacoRef.current = editor;
-        } catch {
-          // swallow if ref assignment not allowed
-        }
+      if (monacoRef) {
+        monacoRef.current = editor;
       }
 
       // also keep internal ref for this component's listener
@@ -97,13 +94,7 @@ const TextEditor = ({ monacoRef }: Props) => {
   // clear refs on unmount
   React.useEffect(() => {
     return () => {
-      if (monacoRef && typeof monacoRef === "object") {
-        try {
-          monacoRef.current = null;
-        } catch {
-          // ignore
-        }
-      }
+      if (monacoRef) monacoRef.current = null;
       internalEditorRef.current = null;
     };
   }, [monacoRef]);
@@ -152,7 +143,7 @@ const TextEditor = ({ monacoRef }: Props) => {
           options={editorOptions}
           onMount={handleMount}
           onValidate={errors => setError(errors[0]?.message || "")}
-          onChange={contents => setContents({ contents, skipUpdate: true })}
+          onChange={(value) => setContents({ contents: value ?? "", skipUpdate: true })}
           loading={<LoadingOverlay visible />}
         />
       </StyledWrapper>
