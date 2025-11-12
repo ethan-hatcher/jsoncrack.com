@@ -21,7 +21,11 @@ const editorOptions: EditorProps["options"] = {
   placeholder: "Start typing...",
 };
 
-const TextEditor = () => {
+type Props = {
+  monacoRef?: React.RefObject<any>;
+};
+
+const TextEditor = ({ monacoRef }: Props) => {
   const monaco = useMonaco();
   const contents = useFile(state => state.contents);
   const setContents = useFile(state => state.setContents);
@@ -30,6 +34,9 @@ const TextEditor = () => {
   const getHasChanges = useFile(state => state.getHasChanges);
   const theme = useConfig(state => (state.darkmodeEnabled ? "vs-dark" : "light"));
   const fileType = useFile(state => state.format);
+
+  // local ref to the editor instance so this component can update the editor on external changes
+  const internalEditorRef = React.useRef<any>(null);
 
   React.useEffect(() => {
     monaco?.languages.json.jsonDefaults.setDiagnosticsOptions({
@@ -66,11 +73,71 @@ const TextEditor = () => {
     };
   }, [getHasChanges]);
 
-  const handleMount: OnMount = useCallback(editor => {
-    editor.onDidPaste(() => {
-      editor.getAction("editor.action.formatDocument")?.run();
-    });
-  }, []);
+  const handleMount: OnMount = useCallback(
+    (editor, monacoInstance) => {
+      // expose the editor instance to parent via ref so other components can call setValue/getValue
+      if (monacoRef && typeof monacoRef === "object") {
+        try {
+          monacoRef.current = editor;
+        } catch {
+          // swallow if ref assignment not allowed
+        }
+      }
+
+      // also keep internal ref for this component's listener
+      internalEditorRef.current = editor;
+
+      editor.onDidPaste(() => {
+        editor.getAction("editor.action.formatDocument")?.run();
+      });
+    },
+    [monacoRef]
+  );
+
+  // clear refs on unmount
+  React.useEffect(() => {
+    return () => {
+      if (monacoRef && typeof monacoRef === "object") {
+        try {
+          monacoRef.current = null;
+        } catch {
+          // ignore
+        }
+      }
+      internalEditorRef.current = null;
+    };
+  }, [monacoRef]);
+
+  // Listen for external JSON updates (NodeModal emits "json:update") and update the left editor
+  React.useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail) return;
+      const newJson = String(detail);
+
+      // update the file store so other app parts see the change
+      try {
+        // avoid triggering additional graph updates from this setContents if the store API supports skip flag
+        setContents({ contents: newJson, skipUpdate: true });
+      } catch {
+        // fallback: ignore
+      }
+
+      // update the Monaco editor content if it's different (avoid clobbering if user is typing)
+      const editor = internalEditorRef.current;
+      try {
+        const current = editor?.getValue?.();
+        if (current !== newJson && typeof editor?.setValue === "function") {
+          editor.setValue(newJson);
+        }
+      } catch {
+        // ignore failures
+      }
+    };
+
+    window.addEventListener("json:update", handler as EventListener);
+    return () => window.removeEventListener("json:update", handler as EventListener);
+  }, [setContents]);
 
   return (
     <StyledEditorWrapper>
